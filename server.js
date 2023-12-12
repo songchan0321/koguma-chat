@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
 const redis = new Redis({
   host: "devcs.co.kr",
-  port: 10038,
+  port: 25000,
   password: "",
 });
 const app = express();
@@ -13,7 +13,7 @@ const port = process.env.PORT || 3001;
 const mongoose = require("mongoose");
 const { default: axios } = require("axios");
 const e = require("express");
-mongoose.connect("mongodb://devcs.co.kr:10039/chat", {
+mongoose.connect("mongodb://devcs.co.kr:30000/chat", {
   // useNewUrlParser: true,
   // useUnifiedTopology: true,
 });
@@ -42,6 +42,39 @@ const roomSchema = new mongoose.Schema({
 });
 const Room = mongoose.model("Room", roomSchema);
 
+const findRoomById = async (roomId) => {
+  try {
+    const room = await Room.findOne({ roomId });
+
+    if (!room) {
+      console.log("Room not found");
+      return null;
+    }
+
+    return room;
+  } catch (error) {
+    console.error("Error finding room:", error);
+    throw error;
+  }
+};
+
+// roomId를 사용하여 buyerId와 senderId 조회
+const findOpponentMemberIdsByRoomId = async (roomId, memberId) => {
+  try {
+    const room = await findRoomById(roomId);
+
+    if (!room) {
+      return null;
+    }
+    const { memberId1, memberId2 } = room;
+    if (memberId === memberId1) return memberId2;
+    else return memberId1;
+  } catch (error) {
+    console.error("Error finding member ids:", error);
+    throw error;
+  }
+};
+
 const CHAT_EVENT = {
   FIRST_CONNECT: "first connect",
   SEND_MESSAGE: "send message",
@@ -49,8 +82,9 @@ const CHAT_EVENT = {
   MESSAGE_LIST: "message list",
   JOIN_ROOM: "join room",
   LEAVE_ROOM: "leave room",
-
+  IS_WRITING: "is writing",
   EVENT_ALERT: "event alert",
+  NEW_MESSAGE: "new message",
 };
 
 app.use(bodyParser.json());
@@ -231,15 +265,16 @@ io.on("connection", (socket) => {
       });
     }
     // if(room.memberId1 === )
-    console.log(room);
+    // console.log(room);
     const message = {
       messageId: uuidv4(),
       senderId: memberId,
       content: data.message,
+      timestamp: new Date(),
     };
 
     // 상대방의 소켓 아이디가 채팅방에 접속되어있다면 전송할 메시지를 즉시 읽음 처리
-    if (clientsInRoom.has(user_list[`${data.toId}`])) {
+    if (clientsInRoom && clientsInRoom.has(user_list[`${data.toId}`])) {
       message.readFlag = true;
     }
 
@@ -284,7 +319,28 @@ io.on("connection", (socket) => {
     // socket.broadcast.emit(CHAT_EVENT.RECEIVED_ALERT);
   });
 
-  socket.on(CHAT_EVENT.LEAVE_ROOM, ({ roomId }) => {
-    socket.leave(roomId);
+  socket.on(CHAT_EVENT.NEW_MESSAGE, async () => {});
+
+  socket.on(CHAT_EVENT.IS_WRITING, async (data) => {
+    if (data.roomId) {
+      const toId = await findOpponentMemberIdsByRoomId(data.roomId);
+      console.log(toId);
+      io.to(user_list[`${toId}`]).emit(
+        CHAT_EVENT.IS_WRITING,
+        data.flag != null ? data.flag : false
+      );
+      // io.to(data.roomId).emit(
+      //   CHAT_EVENT.IS_WRITING,
+
+      // );
+    }
+  });
+
+  socket.on(CHAT_EVENT.LEAVE_ROOM, async (data) => {
+    if (data) {
+      const toId = await findOpponentMemberIdsByRoomId(data.roomId);
+      io.to(user_list[`${toId}`]).emit(CHAT_EVENT.IS_WRITING, false);
+      socket.leave(data.roomId);
+    }
   });
 });
