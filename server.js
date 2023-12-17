@@ -4,6 +4,8 @@ const Redis = require("ioredis");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const offset = 1000 * 60 * 60 * 9;
+const koreaNow = () => new Date(new Date().getTime() + offset);
 const redis = new Redis({
   host: "devcs.co.kr",
   port: 25000,
@@ -39,7 +41,10 @@ const roomSchema = new mongoose.Schema({
       content: String,
       type: { type: String, default: "TEXT" },
       readFlag: { type: Boolean, default: false },
-      timestamp: { type: Date, default: Date.now },
+      timestamp: {
+        type: Date,
+        default: koreaNow,
+      },
     },
   ],
 });
@@ -90,6 +95,7 @@ const CHAT_EVENT = {
   EVENT_CHAT_LIST_ALERT: "event alert1",
   EVENT_BOTTOM_ALERT: "event alert2",
   NEW_MESSAGE: "new message",
+  UPDATE_MESSAGE: "update message",
 };
 app.use((req, res, next) => {
   console.log("load");
@@ -200,7 +206,6 @@ const io = require("socket.io")(server, {
 let user_list = {};
 io.on("connection", (socket) => {
   console.log(`connect : ${socket.id}`);
-
   socket.on(CHAT_EVENT.FIRST_CONNECT, (data) => {
     console.log("FIRST_CONNECT START");
     // 어떤 사용자가 어떤 소켓 아이디를 가지는 지 확인을 위한 user_list
@@ -274,9 +279,10 @@ io.on("connection", (socket) => {
     console.log("SEND MESSAGE START");
     // 해당 room에 누가 접속하고 있는지 소켓 아이디 정보
     console.log("-----------------");
-    console.log(io.sockets.adapter.rooms.get(data.roomId));
-    const clientsInRoom = io.sockets.adapter.rooms.get(data.roomId);
     data.roomId = parseInt(data.roomId);
+    console.log(io.sockets.adapter.rooms.get(data.roomId));
+    console.log(user_list);
+    const clientsInRoom = io.sockets.adapter.rooms.get(data.roomId);
     if (data.roomId == null) {
       console.log("send message roomId 없음");
       return;
@@ -317,7 +323,10 @@ io.on("connection", (socket) => {
       senderId: memberId,
       content: data.message,
       roomId: room.roomId,
-      timestamp: new Date(),
+      timestamp:
+        data.enter_date != null
+          ? new Date(new Date(data.enter_date).getTime() + offset)
+          : koreaNow(),
     };
     if (data.type) {
       message.type = data.type;
@@ -399,6 +408,22 @@ io.on("connection", (socket) => {
       //   CHAT_EVENT.IS_WRITING,
 
       // );
+    }
+  });
+
+  socket.on(CHAT_EVENT.UPDATE_MESSAGE, async (data) => {
+    try {
+      const updatedRoom = await Room.findOneAndUpdate(
+        { roomId: data.roomId, "messages.messageId": data.messageId },
+        { $set: { "messages.$.content": data.content } },
+        { new: true }
+      ).exec();
+
+      console.log("Content updated successfully:", updatedRoom);
+      // Do something with the updated room object
+    } catch (error) {
+      console.error("Error updating content:", error);
+      // Handle error
     }
   });
 
