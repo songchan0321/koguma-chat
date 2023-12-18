@@ -98,7 +98,6 @@ const CHAT_EVENT = {
   UPDATE_MESSAGE: "update message",
 };
 app.use((req, res, next) => {
-  console.log("load");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET");
   res.setHeader(
@@ -181,6 +180,8 @@ app.get("/latestMessage/:roomId", (req, res) => {
       const latestDocument = await Room.findOne({ roomId })
         .sort({ "messages.timestamp": 1 })
         .select({ messages: { $slice: -1 } });
+      console.log(roomId);
+      console.log(latestDocument);
       const latestMessage = latestDocument.messages[0];
       res.json({ latestMessage });
     } catch (err) {
@@ -270,7 +271,10 @@ io.on("connection", (socket) => {
     const room = await Room.findOne({ roomId });
     await socket.join(roomId);
     if (room) {
-      await io.to(roomId).emit(CHAT_EVENT.MESSAGE_LIST, room.messages);
+      // await io.to(roomId).emit(CHAT_EVENT.MESSAGE_LIST, room.messages);
+      await io
+        .to(user_list[`${memberId}`])
+        .emit(CHAT_EVENT.MESSAGE_LIST, room.messages);
     }
     console.log("JOIN_ROOM END");
   });
@@ -318,8 +322,6 @@ io.on("connection", (socket) => {
     }
     // if(room.memberId1 === )
     // console.log(room);
-    console.log("ㅠㅠㅠㅠㅠ");
-    console.log(data.enter_date);
     const message = {
       messageId: uuidv4(),
       senderId: memberId,
@@ -405,10 +407,13 @@ io.on("connection", (socket) => {
         console.log(err);
       }
       const toId = await findOpponentMemberIdsByRoomId(data.roomId, memberId);
-      io.to(user_list[`${toId}`]).emit(
-        CHAT_EVENT.IS_WRITING,
-        data.flag != null ? data.flag : false
-      );
+      const clientsInRoom = io.sockets.adapter.rooms.get(data.roomId);
+      if (clientsInRoom && clientsInRoom.has(user_list[`${toId}`])) {
+        io.to(user_list[`${toId}`]).emit(
+          CHAT_EVENT.IS_WRITING,
+          data.flag != null ? data.flag : false
+        );
+      }
       // io.to(data.roomId).emit(
       //   CHAT_EVENT.IS_WRITING,
 
