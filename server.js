@@ -318,6 +318,8 @@ io.on("connection", (socket) => {
     }
     // if(room.memberId1 === )
     // console.log(room);
+    console.log("ㅠㅠㅠㅠㅠ");
+    console.log(data.enter_date);
     const message = {
       messageId: uuidv4(),
       senderId: memberId,
@@ -325,7 +327,7 @@ io.on("connection", (socket) => {
       roomId: room.roomId,
       timestamp:
         data.enter_date != null
-          ? new Date(new Date(data.enter_date).getTime() + offset)
+          ? new Date(new Date(data.enter_date).getTime() + 1000 + offset)
           : koreaNow(),
     };
     if (data.type) {
@@ -343,7 +345,7 @@ io.on("connection", (socket) => {
     room.messages.push(message);
     await room.save();
 
-    if (!message.readFlag) {
+    if (data.flag !== false && !message.readFlag) {
       // 상대방이 읽지 않았을 때는 채팅방에 접속되어 있지 않다는 의미이니
       // redis에 알림을 추가한다. 이 알림은 읽지 않은 메시지의 수를 계산할 때 쓰일 수 있다.
       // 각 roomId에 알림 수는 채팅방 리스트에서 읽지 않은 메시지 수를 표현할 수 있고,
@@ -379,6 +381,9 @@ io.on("connection", (socket) => {
     }
 
     await io.to(data.roomId).emit(CHAT_EVENT.RECEIVED_MESSAGE, message);
+    if (data.flag === false) {
+      return;
+    }
     await io
       .to(user_list[`${toId}`])
       .emit(CHAT_EVENT.EVENT_CHAT_LIST_ALERT, message);
