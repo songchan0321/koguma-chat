@@ -4,10 +4,13 @@ const Redis = require("ioredis");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const offset = 1000 * 60 * 60 * 9;
+const koreaNow = () => new Date(new Date().getTime() + offset);
 const redis = new Redis({
   host: "devcs.co.kr",
   port: 25000,
   password: "",
+  enableOfflineQueue: false,
 });
 const app = express();
 const port = process.env.PORT || 3001;
@@ -36,8 +39,12 @@ const roomSchema = new mongoose.Schema({
       messageId: String,
       senderId: Number,
       content: String,
+      type: { type: String, default: "TEXT" },
       readFlag: { type: Boolean, default: false },
-      timestamp: { type: Date, default: Date.now },
+      timestamp: {
+        type: Date,
+        default: koreaNow,
+      },
     },
   ],
 });
@@ -68,7 +75,6 @@ const findOpponentMemberIdsByRoomId = async (roomId, memberId) => {
       return null;
     }
     const { memberId1, memberId2 } = room;
-    console.log(memberId1);
     if (memberId === memberId1) return memberId2;
     else return memberId1;
   } catch (error) {
@@ -89,6 +95,7 @@ const CHAT_EVENT = {
   EVENT_CHAT_LIST_ALERT: "event alert1",
   EVENT_BOTTOM_ALERT: "event alert2",
   NEW_MESSAGE: "new message",
+  UPDATE_MESSAGE: "update message",
 };
 app.use((req, res, next) => {
   console.log("load");
@@ -104,20 +111,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use(bodyParser.json());
-app.get("/test", (req, res) => {
-  const { token } = req.body;
-  // console.log(req.headers.authorization);
-  console.log(token);
-  console.log(jwt.decode(token));
-  console.log(
-    jwt.verify(
-      token,
-      "kogumakogumasecuritysecuritykogumakogumaserviceservicekogumakoguma"
-    )
-  );
-});
 // memberId에 해당되는 읽지 않은 모든 메시지의 수
-// jwt 보안 적용 해야함!
 app.get("/unread/count", (req, res) => {
   let count = 0;
   const token = req.headers.authorization;
@@ -146,7 +140,6 @@ app.get("/unread/count", (req, res) => {
 });
 
 // memberId에 roomId에 해당되는 읽지 않은 메시지의 수
-// jwt 보안 적용 해야함!
 app.get("/unread/count/:roomId", (req, res) => {
   let count = 0;
   const token = req.headers.authorization;
@@ -173,7 +166,6 @@ app.get("/unread/count/:roomId", (req, res) => {
 });
 
 // 해당 roomId에 가장 마지막 메시지만 가져오기
-// jwt 보안 적용 해야함!
 app.get("/latestMessage/:roomId", (req, res) => {
   const token = req.headers.authorization;
   let memberId;
@@ -206,16 +198,16 @@ const validationToken = (token) => {
 const server = app.listen(port, function () {
   console.log("Listening on " + port);
 });
-const io = require("socket.io")(server, { cors: { origin: "*" } });
-// io.listen(port, () => {
-//   console.log("Server listening at port %d", port);
-// });
+const io = require("socket.io")(server, {
+  pingInterval: 10000, // 10초마다 서버로 ping을 보냄
+  pingTimeout: 5000,
+  cors: { origin: "*" },
+});
 let user_list = {};
 io.on("connection", (socket) => {
   console.log(`connect : ${socket.id}`);
-
   socket.on(CHAT_EVENT.FIRST_CONNECT, (data) => {
-    console.log(data.token);
+    console.log("FIRST_CONNECT START");
     // 어떤 사용자가 어떤 소켓 아이디를 가지는 지 확인을 위한 user_list
     if (data.token) {
       try {
@@ -226,9 +218,12 @@ io.on("connection", (socket) => {
         console.log(err);
       }
     }
+    console.log("FIRST_CONNECT END");
   });
 
   socket.on(CHAT_EVENT.JOIN_ROOM, async ({ roomId, token }) => {
+    console.log("JOIN_ROOM START");
+    roomId = parseInt(roomId);
     let memberId;
     if (token) {
       try {
@@ -277,10 +272,16 @@ io.on("connection", (socket) => {
     if (room) {
       await io.to(roomId).emit(CHAT_EVENT.MESSAGE_LIST, room.messages);
     }
+    console.log("JOIN_ROOM END");
   });
 
   socket.on(CHAT_EVENT.SEND_MESSAGE, async (data) => {
+    console.log("SEND MESSAGE START");
     // 해당 room에 누가 접속하고 있는지 소켓 아이디 정보
+    console.log("-----------------");
+    data.roomId = parseInt(data.roomId);
+    console.log(io.sockets.adapter.rooms.get(data.roomId));
+    console.log(user_list);
     const clientsInRoom = io.sockets.adapter.rooms.get(data.roomId);
     if (data.roomId == null) {
       console.log("send message roomId 없음");
@@ -302,7 +303,6 @@ io.on("connection", (socket) => {
     if (data.toId) {
       toId = data.toId;
     } else {
-      console.log("여기 1");
       toId = await findOpponentMemberIdsByRoomId(data.roomId, memberId);
     }
     // 채팅방이 없으면 생성
@@ -318,24 +318,34 @@ io.on("connection", (socket) => {
     }
     // if(room.memberId1 === )
     // console.log(room);
+    console.log("ㅠㅠㅠㅠㅠ");
+    console.log(data.enter_date);
     const message = {
       messageId: uuidv4(),
       senderId: memberId,
       content: data.message,
       roomId: room.roomId,
-      timestamp: new Date(),
+      timestamp:
+        data.enter_date != null
+          ? new Date(new Date(data.enter_date).getTime() + 1000 + offset)
+          : koreaNow(),
     };
-
+    if (data.type) {
+      message.type = data.type;
+    }
     // 상대방의 소켓 아이디가 채팅방에 접속되어있다면 전송할 메시지를 즉시 읽음 처리
+    // console.log(clientsInRoom && clientsInRoom.has(user_list[`${toId}`]));
+    // console.log(clientsInRoom);
+    // console.log(clientsInRoom.has(user_list[`${toId}`]));
     if (clientsInRoom && clientsInRoom.has(user_list[`${toId}`])) {
       message.readFlag = true;
     }
-
+    console.log(message);
     // mongo에 채팅방에 메시지 저장
     room.messages.push(message);
     await room.save();
 
-    if (!message.readFlag) {
+    if (data.flag !== false && !message.readFlag) {
       // 상대방이 읽지 않았을 때는 채팅방에 접속되어 있지 않다는 의미이니
       // redis에 알림을 추가한다. 이 알림은 읽지 않은 메시지의 수를 계산할 때 쓰일 수 있다.
       // 각 roomId에 알림 수는 채팅방 리스트에서 읽지 않은 메시지 수를 표현할 수 있고,
@@ -371,6 +381,9 @@ io.on("connection", (socket) => {
     }
 
     await io.to(data.roomId).emit(CHAT_EVENT.RECEIVED_MESSAGE, message);
+    if (data.flag === false) {
+      return;
+    }
     await io
       .to(user_list[`${toId}`])
       .emit(CHAT_EVENT.EVENT_CHAT_LIST_ALERT, message);
@@ -391,7 +404,6 @@ io.on("connection", (socket) => {
       } catch (err) {
         console.log(err);
       }
-      console.log("여기 2");
       const toId = await findOpponentMemberIdsByRoomId(data.roomId, memberId);
       io.to(user_list[`${toId}`]).emit(
         CHAT_EVENT.IS_WRITING,
@@ -404,6 +416,22 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on(CHAT_EVENT.UPDATE_MESSAGE, async (data) => {
+    try {
+      const updatedRoom = await Room.findOneAndUpdate(
+        { roomId: data.roomId, "messages.messageId": data.messageId },
+        { $set: { "messages.$.content": data.content } },
+        { new: true }
+      ).exec();
+
+      console.log("Content updated successfully:", updatedRoom);
+      // Do something with the updated room object
+    } catch (error) {
+      console.error("Error updating content:", error);
+      // Handle error
+    }
+  });
+
   socket.on(CHAT_EVENT.LEAVE_ROOM, async (data) => {
     if (data) {
       let memberId;
@@ -412,11 +440,10 @@ io.on("connection", (socket) => {
       } catch (err) {
         console.log(err);
       }
-      console.log("여기4");
       const toId = await findOpponentMemberIdsByRoomId(data.roomId, memberId);
       // const toId = await findOpponentMemberIdsByRoomId(data.roomId);
       await io.to(user_list[`${toId}`]).emit(CHAT_EVENT.IS_WRITING, false);
-      socket.leave(data.roomId);
+      socket.leave(parseInt(data.roomId));
     }
   });
 });
