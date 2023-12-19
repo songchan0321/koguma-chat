@@ -21,8 +21,8 @@ let server;
 const port = process.env.PORT;
 try {
   const options = {
-    key: fs.readFileSync("./private.key"),
-    cert: fs.readFileSync("./chain.crt"),
+    key: fs.readFileSync("./private.pem"),
+    cert: fs.readFileSync("./chain.pem"),
   };
   server = https.createServer(options, app);
   server.listen(port, () => {
