@@ -1,23 +1,48 @@
+require("dotenv").config();
 const express = require("express");
+const https = require("https");
 const bodyParser = require("body-parser");
 const Redis = require("ioredis");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const fs = require("fs");
 const offset = 1000 * 60 * 60 * 9;
 const koreaNow = () => new Date(new Date().getTime() + offset);
 const redis = new Redis({
-  host: "devcs.co.kr",
-  port: 25000,
-  password: "",
+  host: process.env.CHAT_REDIS_HOST,
+  password: process.env.CHAT_REDIS_PASSWORD,
+  port: process.env.CHAT_REDIS_PORT,
+  password: process.env.CHAT_REDIS_PASSWORD,
   enableOfflineQueue: false,
 });
 const app = express();
-const port = process.env.PORT || 3001;
+let server;
+const port = process.env.PORT;
+try {
+  const options = {
+    key: fs.readFileSync("./private.key"),
+    cert: fs.readFileSync("./chain.crt"),
+  };
+  server = https.createServer(options, app);
+  server.listen(port, () => {
+    console.log("HTTPS server listening on port " + port);
+  });
+} catch (err) {
+  server = app.listen(port, function () {
+    console.log("Listening on " + port);
+  });
+}
+// const server = app.listen(port, function () {
+//   console.log("Listening on " + port);
+// });
+
+// const server = https.createServer(options, app);
+
 // const server = require("http").createServer(app);
 const mongoose = require("mongoose");
 const { default: axios } = require("axios");
-mongoose.connect("mongodb://devcs.co.kr:30000/chat", {
+mongoose.connect(process.env.CHAT_MONGO_HOST, {
   // useNewUrlParser: true,
   // useUnifiedTopology: true,
 });
@@ -190,15 +215,9 @@ app.get("/latestMessage/:roomId", (req, res) => {
   })();
 });
 const validationToken = (token) => {
-  return jwt.verify(
-    token,
-    "kogumakogumasecuritysecuritykogumakogumaserviceservicekogumakoguma"
-  )["id"];
+  return jwt.verify(token, process.env.JWT_SECRET_KEY)["id"];
 };
 
-const server = app.listen(port, function () {
-  console.log("Listening on " + port);
-});
 const io = require("socket.io")(server, {
   pingInterval: 10000, // 10초마다 서버로 ping을 보냄
   pingTimeout: 5000,
