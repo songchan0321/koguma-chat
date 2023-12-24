@@ -120,6 +120,11 @@ const CHAT_EVENT = {
   NEW_MESSAGE: "new message",
   UPDATE_MESSAGE: "update message",
 };
+const CALL_EVENT = {
+  CALL: "call",
+  CALL_CANCEL: "call cancel",
+  ACCEPT: "accept",
+};
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET");
@@ -464,6 +469,37 @@ io.on("connection", (socket) => {
       // const toId = await findOpponentMemberIdsByRoomId(data.roomId);
       await io.to(user_list[`${toId}`]).emit(CHAT_EVENT.IS_WRITING, false);
       socket.leave(parseInt(data.roomId));
+    }
+  });
+
+  socket.on(CALL_EVENT.CALL, (data) => {
+    console.log("CALL EVENT");
+    console.log(data);
+    if (!data.targetMemberId) return;
+    const { targetMemberId } = data;
+    io.to(user_list[`${targetMemberId}`]).emit(CALL_EVENT.CALL, {
+      sourceMember: data.sourceMember,
+      roomId: data.roomId,
+    });
+  });
+
+  socket.on(CALL_EVENT.CALL_CANCEL, (data) => {
+    console.log("CALL_CANCEL");
+    console.log(data);
+    if (data.targetMemberId) {
+      console.log(data.targetMemberId);
+      io.to(user_list[`${data.targetMemberId}`]).emit(CALL_EVENT.CALL_CANCEL);
+      console.log(user_list);
+      console.log(socket.id);
+      io.to(socket.id).emit(CALL_EVENT.CALL_CANCEL);
+      // socket.to(data.roomId).emit(CALL_EVENT.CALL_CANCEL);
+      // io.in(data.roomId).emit(CALL_EVENT.CALL_CANCEL);
+    }
+  });
+
+  socket.on(CALL_EVENT.ACCEPT, (data) => {
+    if (data.sourceMemberId) {
+      io.to(user_list[`${data.sourceMemberId}`]).emit(CALL_EVENT.ACCEPT);
     }
   });
 });
